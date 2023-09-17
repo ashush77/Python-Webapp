@@ -1,0 +1,80 @@
+pipeline {
+    agent any
+    tools{
+        jdk  'jdk17'
+        
+    }
+    
+    environment{
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+               git branch: 'main', url: 'https://github.com/ashush77/Python-Webapp.git'
+            }
+        }
+        
+        
+         stage('Trivy FS Scan') {
+            steps {
+               sh "trivy fs ."
+            }
+        }
+        
+         stage('OWASP Scan') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ ', odcInstallation: 'DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        stage('Sonarqube') {
+            steps {
+                withSonarQubeEnv('sonar'){
+                   sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=pythonapp \
+                   -Dsonar.java.binaries=. \
+                   -Dsonar.projectKey=pythonapp '''
+               }
+            }
+        }
+        
+        stage('Docker build and Tag') {
+            steps {
+                script{
+               withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                   sh "make image"
+               }
+              }
+            }
+        }
+        
+         stage('Trivy Scan Image') {
+            steps {
+               sh "trivy image ashushrm77/python-webapp:latest"
+            }
+        }
+        
+         stage('Docker Push Image') {
+            steps {
+                script{
+               withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                   sh "make push"
+               }
+              }
+            }
+        }
+        
+        stage('Deploy the app') {
+            steps {
+                script{
+               withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                   sh "docker run -d -p 5000:5000 ashushrm77/python-webapp:latest"
+               }
+              }
+            }
+        }
+        
+   }
+}
